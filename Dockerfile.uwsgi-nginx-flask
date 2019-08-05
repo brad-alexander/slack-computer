@@ -1,0 +1,12 @@
+FROM tiangolo/uwsgi-nginx-flask:python3.7
+
+RUN apt update \
+    && apt install -y certbot python-certbot-nginx \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY ./example_app /app/app
+COPY ./computer /app/computer
+COPY ./setup.py /app
+
+RUN cd /app/app && pip install -r requirements.txt
+

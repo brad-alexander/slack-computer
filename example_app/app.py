@@ -3,9 +3,9 @@ from logging.config import dictConfig
 from flask import Flask
 
 from computer import events
-import example_app.slack_events.link_shared
-import example_app.slack_events.message
-import example_app.slack_events.reaction_added
+from slack_events import link_shared
+from slack_events import message
+from slack_events import reaction_added
 
 dictConfig({
     'version': 1,
