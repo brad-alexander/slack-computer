@@ -1,5 +1,5 @@
 # project specific
-venv/
+venv
 
 # ignore .git and .cache folders
 .git

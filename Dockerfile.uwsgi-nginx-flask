@@ -10,3 +10,4 @@ COPY ./setup.py /app
 
 RUN cd /app/app && pip install -r requirements.txt
 
+COPY ./example_app/prestart.sh /app

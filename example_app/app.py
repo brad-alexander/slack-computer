@@ -3,6 +3,7 @@ from logging.config import dictConfig
 from flask import Flask
 
 from computer import events
+from computer import stud
 from slack_events import link_shared
 from slack_events import message
 from slack_events import reaction_added
@@ -28,6 +29,7 @@ def create_app():
     app = Flask(__name__)
     app.config.from_pyfile('./config.py')
     app.register_blueprint(events)
+    app.register_blueprint(stud, url_prefix='/stud')
     return app
 
 

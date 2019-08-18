@@ -1,4 +1,5 @@
 from computer.slack import events
+from computer.poker import bp as stud
 
 import logging
 TRACE_LEVEL_NUM = 9

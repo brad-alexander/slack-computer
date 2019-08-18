@@ -1,4 +1,5 @@
 config.py
+venv
 
 # https://raw.githubusercontent.com/pallets/flask/master/.gitignore
 .DS_Store
