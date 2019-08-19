@@ -11,6 +11,7 @@ Flow:
 import json
 from urllib.parse import urlparse, parse_qs
 from pprint import pprint
+from itertools import islice
 
 import slack
 
@@ -69,14 +70,33 @@ def options():
 
 
 def get_user_img_by_id(userid):
-    return slack.WebClient(bp.config['slack_oauth_access_token']).users_info(user=userid)['user']['profile']['image_32']
+    img = slack.WebClient(bp.config['slack_oauth_access_token']).users_info(user=userid)['user']['profile']['image_32']
+    if 'gravatar' in img:
+        img = 'https://i.imgur.com/dYAkkn6.png'
+    return img
+
+
+def take(n, iterable):
+    """Return first n items of the iterable as a list"""
+    return list(islice(iterable, n))
+
+
+def unchain(iterable, n):
+    iterable = iter(iterable)
+    while True:
+        result = take(n, iterable)
+        if result:
+            yield result
+        else:
+            return
 
 
 class VoteURL:
-    def __init__(self, userid, vote, image=None):
+    def __init__(self, userid, vote, username=None, image=None):
         if isinstance(userid, list):
             raise ValueError
         self.userid = userid
+        self.username = username
         self.vote = vote
         self._image = image
 
@@ -100,7 +120,7 @@ class VoteURL:
 
     @property
     def context(self):
-        return dict(type="image", image_url=self.image, alt_text=repr(self))
+        return dict(type="image", image_url=self.image, alt_text=self.username or self.userid)
 
     @property
     def revealed_context(self):
@@ -126,14 +146,12 @@ class VoteURLs:
 
     @classmethod
     def from_blocks(cls, blocks):
+        elements = []
         for block in blocks:
-            if block['block_id'] == 'votes':
-                votes = block
-                break
-        else:
-            return cls(votes=[])
+            if block['block_id'].startswith('votes'):
+                elements.extend(block['elements'])
         voteurls = []
-        for vote in votes['elements']:
+        for vote in elements:
             if vote['type'] == 'image':
                 voteurls.append(VoteURL.from_url(vote['image_url']))
         return cls(votes=voteurls)
@@ -142,11 +160,15 @@ class VoteURLs:
         return {v.userid: v for v in self._votes}
 
     def to_blocks(self, revealed=False):
+        items = []
         for k, v in self.to_dict().items():
             if revealed:
-                yield from v.revealed_context
+                items.extend(v.revealed_context)
             else:
-                yield v.context
+                items.append(v.context)
+        paginated = list(unchain(items, 10))
+        for i, items in enumerate(paginated):
+            yield dict(block_id=f'votes{i}', elements=items, type='context')
 
 
 @bp.route('/action', methods=['GET', 'POST'])
@@ -154,27 +176,26 @@ def action():
     current_app.logger.debug(request.form)
     current_app.logger.debug(g.data)
     if g.data['type'] == 'block_actions':
-        current_app.logger.debug(g.data.keys())
         blocks = g.data['message']['blocks']
         user = g.data['user']
         vote_value = [x['value'].split('_')[1] for x in g.data['actions']][0]
         reveal = 'reveal' in vote_value
-        vote = VoteURL(user['id'], vote_value)
+        vote = VoteURL(user['id'], vote_value, username=user['username'])
         voteurls = VoteURLs.from_blocks(blocks)
-        for v in voteurls:
-            current_app.logger.debug(v)
         if not reveal:
             voteurls._votes.append(vote)
-        current_app.logger.debug(blocks)
         voted = blocks[1]
         num_votes = len(voteurls)
         new_elements = voted['elements'][0:1]
         new_elements[0]['text'] = f'Votes: {num_votes}'
-        new_elements.extend(voteurls.to_blocks(revealed=reveal))
+        vote_blocks = list(voteurls.to_blocks(revealed=reveal))
         voted['elements'] = new_elements
+        blocks = blocks[0:3]
         if reveal:
-            blocks = blocks[0:2]
-        pprint(blocks)
+            blocks = [block for block in blocks if block['block_id'] in ['original_text', 'vote_count']]
+        else:
+            blocks = [block for block in blocks if block['block_id'] in ['original_text', 'vote_count', 'actions']]
+        blocks += vote_blocks
         slack.WebClient(token=bp.config['slack_oauth_access_token']) \
             .chat_update(text=g.data['message']['text'] + 'New Text!', blocks=blocks, channel=g.data['channel']['id'],
                          ts=
@@ -193,24 +214,15 @@ def action():
                                  emoji=True),
                     'value': f"vote_reveal",
                     "style": "danger"})
-        blocks = [{
-            "type":     "section",
-            "block_id": "section789",
-            "fields":   [{
-                "type": "mrkdwn",
-                "text": '*Estimate:* ' + msg['text']
-            }]
-        },
-            {
-                "type":     "context",
-                "block_id": "votes",
-                "elements": [{
-                    "type": "mrkdwn",
-                    "text": "Votes: 0"
-                }]
-            },
-            dict(type="actions",
-                 elements=buttons)]
+        blocks = [dict(block_id="original_text",
+                       type="section",
+                       fields=[dict(type="mrkdwn", text='*Estimate:* ' + msg['text'])]),
+                  dict(block_id="vote_count",
+                       type="context",
+                       elements=[dict(type="mrkdwn", text="Votes: 0")]),
+                  dict(block_id="actions",
+                       type="actions",
+                       elements=buttons)]
         outmessage = dict(text=msg['text'], blocks=blocks, channel=g.data['channel']['id'])
         current_app.logger.debug(outmessage)
         slack.WebClient(token=bp.config['slack_oauth_access_token']).chat_postMessage(**outmessage)
